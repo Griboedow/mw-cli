@@ -1,0 +1,106 @@
+"""Provision an isolated SQLite MediaWiki and execute live tests. Requires PHP CLI.
+
+Used by CI only; never reads an existing LocalSettings.php or touches a user's wiki.
+All wiki state lives in a freshly created temporary directory.
+"""
+
+import os
+import secrets
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+from pathlib import Path
+from urllib.request import urlopen
+
+
+def main():
+    version = sys.argv[1] if len(sys.argv) > 1 else "1.43.1"
+    minor = ".".join(version.split(".")[:2])
+    with tempfile.TemporaryDirectory(prefix="mw-cli-live-") as directory:
+        root = Path(directory)
+        archive = root / "mediawiki.tar.gz"
+        with urlopen(
+            f"https://releases.wikimedia.org/mediawiki/{minor}/mediawiki-{version}.tar.gz", timeout=120
+        ) as response, archive.open("wb") as output:
+            shutil.copyfileobj(response, output)
+        with tarfile.open(archive) as package:
+            package.extractall(root, filter="data")
+        wiki = root / ("mediawiki-" + version)
+        database = root / "db"
+        database.mkdir()
+        password = secrets.token_hex(20)
+        bot_password = secrets.token_hex(16)
+        subprocess.run(
+            [
+                "php",
+                "maintenance/install.php",
+                "--dbtype",
+                "sqlite",
+                "--dbpath",
+                str(database),
+                "--dbname",
+                "mwcli",
+                "--server",
+                "http://127.0.0.1:8765",
+                "--scriptpath",
+                "",
+                "--pass",
+                password,
+                "CLI Test Wiki",
+                "Admin",
+            ],
+            cwd=wiki,
+            check=True,
+        )
+        with (wiki / "LocalSettings.php").open("a") as settings:
+            settings.write(
+                "\n$wgEnableUploads = true;\n$wgEnableBotPasswords = true;\n"
+                "$wgRateLimits = [];\n$wgPasswordAttemptThrottle = [];\n"
+            )
+        # PHP is the server's native setup API; CLI and test orchestration stay Python.
+        setup = r"""
+        $services = \MediaWiki\MediaWikiServices::getInstance();
+        $class = class_exists('MediaWiki\\User\\BotPassword') ? 'MediaWiki\\User\\BotPassword' : 'BotPassword';
+        $bot = $class::newUnsaved(['username' => 'Admin', 'appId' => 'mw-cli',
+          'grants' => ['basic', 'editpage', 'createeditmovepage', 'uploadfile', 'uploadeditmovefile', 'delete']]);
+        $password = $services->getPasswordFactory()->newFromPlaintext(getenv('MW_LIVE_PASSWORD'));
+        $status = $bot->save('insert', $password);
+        if (!$status->isOK()) { throw new RuntimeException('Bot Password setup failed'); }
+        """
+        env = {
+            **os.environ,
+            "MW_LIVE_DISPOSABLE": "1",
+            "MW_LIVE_API": "http://127.0.0.1:8765/api.php",
+            "MW_LIVE_USERNAME": "Admin@mw-cli",
+            "MW_LIVE_PASSWORD": bot_password,
+            "NO_PROXY": "127.0.0.1,localhost",
+        }
+        subprocess.run(["php", "maintenance/eval.php"], input=setup, text=True, env=env, cwd=wiki, check=True)
+        with (root / "server.log").open("w") as log:
+            server = subprocess.Popen(
+                ["php", "-S", "127.0.0.1:8765", "-t", str(wiki)], stdout=log, stderr=log
+            )
+            try:
+                for _ in range(60):
+                    try:
+                        with urlopen("http://127.0.0.1:8765/api.php?action=query&format=json", timeout=2):
+                            break
+                    except OSError:
+                        if server.poll() is not None:
+                            raise RuntimeError("Disposable wiki server exited")
+                        time.sleep(1)
+                else:
+                    raise RuntimeError("Disposable wiki did not become ready")
+                subprocess.run(
+                    [sys.executable, "-m", "pytest", "tests/test_live.py", "-v"], env=env, check=True
+                )
+            finally:
+                server.terminate()
+                server.wait(timeout=10)
+
+
+if __name__ == "__main__":
+    main()

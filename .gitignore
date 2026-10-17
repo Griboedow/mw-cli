@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.coverage*
+htmlcov/
+coverage.xml
+dist/
+build/
+*.egg-info/
+.env
+.mw-cli/

@@ -64,6 +64,42 @@ Other commands: `pages`, `history`, `links`, `backlinks`, `categories`,
 Use `COMMAND --help` for examples and constraints. `api paraminfo` discovers
 extension-specific modules. SMW writes use the normal wikitext edit workflow.
 
+## Phrase attribution and diagnostics
+
+```sh
+mw-cli blame 'Guide' --text 'some words'
+mw-cli blame 'Guide' --text 'some words' --mode first --max-revisions 5000
+mw-cli audit redlinks --title 'Guide' --all
+mw-cli audit redlinks --all
+mw-cli audit missing-files --all
+mw-cli audit broken-redirects --all
+mw-cli audit double-redirects --all
+mw-cli audit orphaned-pages --all
+```
+
+`blame` returns author, timestamp, revision, edit summary and a diff URL. The default
+`current` mode finds the beginning of uninterrupted **exact phrase presence** ending
+at the pinned current revision. A restoring edit starts a new episode. `--mode first`
+finds the earliest appearance, including phrases no longer present. Matching is
+case-sensitive against main-slot source, not rendered/transcluded text. This is not
+per-word attribution or tracking a particular duplicate/copy across pages.
+
+Search is sequential and bounded (1,000 revisions by default), because text may
+disappear and reappear. Always inspect `complete` and `status`: hidden content,
+history gaps and limits leave `origin=null`; `candidate` is only a provisional
+boundary. Exit 0 means the search ran, not that an origin was proven. Raise the limit
+and rerun to search deeper. Hidden authors/summaries remain null and explicitly flagged.
+
+`audit redlinks --title` filters missing outgoing link targets into `items`, keeping
+raw API `batches` and continuation metadata. Wiki-wide reports use MediaWiki's
+QueryPage caches and can be stale/capped even when API pagination is complete. They
+do not check external URLs or change the wiki. Use `backlinks TITLE` to find referring
+pages. Diagnostics and blame require only read permissions; no new runtime dependency.
+
+API contracts: [revisions](https://www.mediawiki.org/wiki/API:Revisions),
+[link targets](https://www.mediawiki.org/wiki/API:Links),
+[QueryPage reports](https://www.mediawiki.org/wiki/API:Querypage).
+
 ## Agent contract
 
 - JSON on stdout by default; `read --raw` emits source and `parse --raw` emits HTML.

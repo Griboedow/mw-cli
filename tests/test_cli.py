@@ -160,11 +160,41 @@ def test_no_guidelines_and_anonymous(wiki, monkeypatch):
         (["categories", "Guide"], {"prop": "categories"}),
         (["category-members", "Category:X"], {"cmtitle": "Category:X"}),
         (["recent-changes"], {"list": "recentchanges"}),
+        (["audit", "redlinks"], {"list": "querypage", "qppage": "Wantedpages"}),
+        (["audit", "missing-files"], {"list": "querypage", "qppage": "Wantedfiles"}),
+        (["audit", "broken-redirects"], {"qppage": "BrokenRedirects"}),
+        (["audit", "double-redirects"], {"qppage": "DoubleRedirects"}),
+        (["audit", "orphaned-pages"], {"qppage": "Lonelypages"}),
     ],
 )
 def test_collection_commands(wiki, command, params):
     assert ok(*command, "--limit", "12")["complete"]
     assert all(wiki.calls[-1][1][k] == v for k, v in params.items())
+
+
+def test_page_redlinks_pagination(wiki):
+    def handler(params, binary, request):
+        if params.get("generator") == "links":
+            assert params["pageids"] and params["gpllimit"] == "2"
+            if "gplcontinue" in params:
+                return 200, {"query": {"pages": [{"ns": 0, "title": "Missing two", "missing": True}]}}, {}
+            return (
+                200,
+                {
+                    "query": {
+                        "pages": [{"pageid": 1, "title": "Exists"}, {"title": "Missing one", "missing": True}]
+                    },
+                    "continue": {"continue": "gplcontinue||", "gplcontinue": "next"},
+                },
+                {},
+            )
+
+    wiki.handler = handler
+    partial = ok("audit", "redlinks", "--title", "Guide", "--limit", "2")
+    assert not partial["complete"] and len(partial["items"]) == 1
+    full = ok("audit", "redlinks", "--title", "Guide", "--limit", "2", "--all")
+    assert full["complete"] and [p["title"] for p in full["items"]] == ["Missing one", "Missing two"]
+    assert run("audit", "redlinks", "--title", "Missing").exit_code == 3
 
 
 @pytest.mark.parametrize(

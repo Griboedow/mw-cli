@@ -6,6 +6,7 @@ from pathlib import Path
 import click
 
 from . import __version__, files, semantic
+from . import blame as attribution
 from .client import Client
 from .config import config_path, read_json, resolve, write_json
 from .errors import WikiError, require
@@ -415,6 +416,119 @@ def history(title, limit, all_, max_batches):
             max_batches=max_batches,
         )
     )
+
+
+@cli.command()
+@click.argument("title")
+@click.option("--text", required=True, help="Exact case-sensitive phrase in source wikitext; quote it.")
+@click.option(
+    "--mode",
+    type=click.Choice(["current", "first"]),
+    default="current",
+    show_default=True,
+    help="Current uninterrupted presence, or earliest appearance in page history.",
+)
+@click.option(
+    "--max-revisions",
+    type=click.IntRange(1, 100000),
+    default=1000,
+    show_default=True,
+    help="Maximum revisions inspected. A limit returns complete=false, origin=null.",
+)
+def blame(title, text, mode, max_revisions):
+    """Find who introduced a phrase, when, and in which edit (including a diff URL).
+
+    Example: mw-cli blame Guide --text 'some words' --mode first
+
+    Searches exact MAIN-SLOT SOURCE, not rendered HTML or transcluded text. Pins
+    the current revision, scans sequentially with pagination and stops at hidden
+    content/history gaps. JSON status/complete must be checked even on exit 0.
+    candidate is NOT a proven origin. Increase --max-revisions and rerun if limited.
+
+    current finds the start of uninterrupted phrase presence ending at the pinned
+    revision; an edit restoring removed text is its origin. first searches from
+    page creation and also works for text no longer present. This is phrase-level
+    presence, not per-word authorship: duplicates, moves within a page, spelling
+    changes and cross-page copying cannot identify an individual occurrence.
+    """
+    require(bool(text), "--text cannot be empty.")
+    emit(attribution.trace(client(), title, text, mode=mode, max_revisions=max_revisions))
+
+
+@cli.group()
+def audit():
+    """Read-only wiki diagnostics. Each report has --help and bounded pagination.
+
+    Wiki-wide reports use server QueryPage caches, which may be stale or capped.
+    complete means API pagination exhausted, not a fresh exhaustive wiki scan.
+    Nothing is fixed/deleted automatically. Use backlinks to locate referring pages.
+    """
+
+
+@audit.command("redlinks")
+@click.option("--title", help="Inspect outgoing links on this page instead of wiki-wide Wantedpages.")
+@paging
+def redlinks(title, limit, all_, max_batches):
+    """Find missing link targets; includes namespace/title and server report metadata.
+
+    Examples: mw-cli audit redlinks --all
+              mw-cli audit redlinks --title Guide --all
+
+    With --title, returns items plus raw batches; items contain only missing
+    targets. The source must exist. Without --title uses cached Wantedpages.
+    Does not test external URLs, template existence or interwiki destinations.
+    """
+    wiki = client()
+    if title:
+        page = wiki.read(title)
+        result = wiki.collect(
+            {
+                "action": "query",
+                "generator": "links",
+                "pageids": page["pageid"],
+                "prop": "info",
+                "gpllimit": limit,
+            },
+            all=all_,
+            max_batches=max_batches,
+        )
+        result["items"] = [
+            p
+            for batch in result["batches"]
+            for p in batch.get("query", {}).get("pages", [])
+            if "missing" in p
+        ]
+        result["source"] = page["title"]
+        emit(result)
+    else:
+        emit(
+            wiki.collect(
+                {"action": "query", "list": "querypage", "qppage": "Wantedpages", "qplimit": limit},
+                all=all_,
+                max_batches=max_batches,
+            )
+        )
+
+
+def add_report(name, report, description):
+    @click.command(name, help=description + " Uses the server's possibly cached/capped QueryPage report.")
+    @paging
+    def command(limit, all_, max_batches):
+        emit(
+            client().collect(
+                {"action": "query", "list": "querypage", "qppage": report, "qplimit": limit},
+                all=all_,
+                max_batches=max_batches,
+            )
+        )
+
+    audit.add_command(command)
+
+
+add_report("missing-files", "Wantedfiles", "List referenced files that do not exist.")
+add_report("broken-redirects", "BrokenRedirects", "List redirects pointing to missing pages.")
+add_report("double-redirects", "DoubleRedirects", "List redirects pointing to another redirect.")
+add_report("orphaned-pages", "Lonelypages", "List pages without incoming wiki links.")
 
 
 def add_relation(name, description, params_factory):

@@ -18,7 +18,14 @@ from mw_cli.config import Config
 @pytest.mark.skipif(
     os.environ.get("MW_LIVE_DISPOSABLE") != "1", reason="Requires an explicitly disposable wiki"
 )
-def test_live_page_lifecycle():
+def test_live_page_lifecycle(monkeypatch):
+    import json
+
+    from click.testing import CliRunner
+
+    from mw_cli.blame import trace
+    from mw_cli.cli import cli
+
     c = Client(
         Config(os.environ["MW_LIVE_API"], os.environ["MW_LIVE_USERNAME"], os.environ["MW_LIVE_PASSWORD"])
     )
@@ -41,13 +48,25 @@ def test_live_page_lifecycle():
             {
                 "action": "edit",
                 "title": title,
-                "text": "Updated",
+                "text": "Updated [[" + title + "-Missing]]",
                 "baserevid": page["revid"],
                 "summary": "test update",
             }
         )
         c.mutate({"action": "move", "from": title, "to": moved, "reason": "test move"})
-        assert c.read(moved)["content"] == "Updated"
+        assert c.read(moved)["content"].startswith("Updated")
+        first = trace(c, moved, "Test α", mode="first")
+        assert first["complete"] and first["origin"]["revid"] == page["revid"]
+        current = trace(c, moved, "Updated")
+        assert current["complete"] and current["origin"]["parentid"] == page["revid"]
+        assert current["origin"]["diff_url"].startswith("http")
+        monkeypatch.setattr("mw_cli.cli.client", lambda: c)
+        result = CliRunner().invoke(cli, ["audit", "redlinks", "--title", moved, "--all"])
+        assert result.exit_code == 0, result.output
+        assert title + "-Missing" in [p["title"] for p in json.loads(result.stdout)["items"]]
+        for report in ("redlinks", "missing-files", "broken-redirects", "double-redirects", "orphaned-pages"):
+            result = CliRunner().invoke(cli, ["audit", report])
+            assert result.exit_code == 0, result.output
     finally:
         from mw_cli.errors import WikiError
 

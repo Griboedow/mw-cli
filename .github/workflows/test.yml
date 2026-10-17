@@ -25,9 +25,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - mediawiki: '1.39.12'
-            php: '8.1'
           - mediawiki: '1.43.1'
+            php: '8.3'
+          - mediawiki: '1.45.0'
             php: '8.3'
     steps:
       - uses: actions/checkout@v4

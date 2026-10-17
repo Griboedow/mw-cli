@@ -123,7 +123,7 @@ or MediaWiki release has been tested. Baseline: MediaWiki 1.39+ Action API, main
 extension/version compatibility depends on the target installation.
 
 CI runs Python 3.10/3.12/3.14 on Windows/Linux/macOS and provisions disposable
-MediaWiki 1.39.12 and 1.43.1 with SQLite for real Bot Password/page/file tests.
+MediaWiki 1.43.1 and 1.45.0 with SQLite for real Bot Password/page/file tests.
 `python tests/run_disposable_wiki.py 1.43.1` reproduces the live setup with Python
 3.12+ and a PHP CLI with sqlite3, intl, mbstring, XML and fileinfo available.
 Semantic MediaWiki is covered by API-contract tests, not this core-only live matrix.

@@ -97,7 +97,15 @@ def main():
             "MW_LIVE_PASSWORD": bot_password,
             "NO_PROXY": "127.0.0.1,localhost",
         }
-        subprocess.run(["php", "maintenance/eval.php"], input=setup, text=True, env=env, cwd=wiki, check=True)
+        # eval.php executes one input line at a time, unlike a normal PHP script.
+        subprocess.run(
+            ["php", "maintenance/eval.php"],
+            input=" ".join(setup.splitlines()) + "\n",
+            text=True,
+            env=env,
+            cwd=wiki,
+            check=True,
+        )
         with (root / "server.log").open("w") as log:
             server = subprocess.Popen(
                 ["php", "-S", "127.0.0.1:8765", "-t", str(wiki)], stdout=log, stderr=log

@@ -75,7 +75,7 @@ class Client:
             if not post and retries and code == "maxlag":
                 self.sleep(1)
                 return self.request(params, retries=retries - 1)
-            raise WikiError(code, "MediaWiki rejected the request.", details={"api_code": code})
+            raise WikiError(code, f"MediaWiki rejected the request ({code}).", details={"api_code": code})
         return result
 
     def login(self):

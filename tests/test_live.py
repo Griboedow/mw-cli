@@ -65,7 +65,9 @@ def test_live_page_lifecycle():
     os.environ.get("MW_LIVE_DISPOSABLE") != "1", reason="Requires an explicitly disposable wiki"
 )
 def test_live_file_roundtrip(tmp_path):
-    import base64
+    import secrets
+    import struct
+    import zlib
 
     from mw_cli import files
 
@@ -75,15 +77,21 @@ def test_live_file_roundtrip(tmp_path):
     c.login()
     name = "MwCliTest-" + uuid.uuid4().hex + ".png"
     source = tmp_path / name
-    # One pixel PNG; unique file names keep operations isolated.
+
+    # A unique valid PNG large enough for multiple default-minimum 1 KiB chunks.
+    def png_chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    pixels = b"".join(b"\x00" + secrets.token_bytes(32 * 3) for _ in range(32))
     source.write_bytes(
-        base64.b64decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
-        )
+        b"\x89PNG\r\n\x1a\n"
+        + png_chunk(b"IHDR", struct.pack(">IIBBBBB", 32, 32, 8, 2, 0, 0, 0))
+        + png_chunk(b"IDAT", zlib.compress(pixels))
+        + png_chunk(b"IEND", b"")
     )
     uploaded = False
     try:
-        files.upload(c, source, comment="mw-cli disposable file test", chunk_size=32, ignore_warnings=True)
+        files.upload(c, source, comment="mw-cli disposable file test", chunk_size=1024)
         uploaded = True
         destination = tmp_path / "download.png"
         files.download(c, name, destination)

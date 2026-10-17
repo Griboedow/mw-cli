@@ -880,4 +880,10 @@ def api(action, param, params_file, write_, dry_run):
 
 
 def main():
+    import sys
+
+    # Stable UTF-8 even when an agent redirects stdout on a legacy Windows locale.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     cli()

@@ -6,10 +6,8 @@ All wiki state lives in a freshly created temporary directory.
 
 import os
 import secrets
-import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 import time
 from pathlib import Path
@@ -21,14 +19,35 @@ def main():
     minor = ".".join(version.split(".")[:2])
     with tempfile.TemporaryDirectory(prefix="mw-cli-live-") as directory:
         root = Path(directory)
-        archive = root / "mediawiki.tar.gz"
-        with urlopen(
-            f"https://releases.wikimedia.org/mediawiki/{minor}/mediawiki-{version}.tar.gz", timeout=120
-        ) as response, archive.open("wb") as output:
-            shutil.copyfileobj(response, output)
-        with tarfile.open(archive) as package:
-            package.extractall(root, filter="data")
         wiki = root / ("mediawiki-" + version)
+        # Wikimedia release downloads can reject CI cloud IPs. Official GitHub mirrors
+        # provide both core and the prebuilt dependency tree without that endpoint.
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                version,
+                "https://github.com/wikimedia/mediawiki.git",
+                str(wiki),
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                "REL" + minor.replace(".", "_"),
+                "https://github.com/wikimedia/mediawiki-vendor.git",
+                str(wiki / "vendor"),
+            ],
+            check=True,
+        )
         database = root / "db"
         database.mkdir()
         password = secrets.token_hex(20)

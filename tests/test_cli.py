@@ -65,6 +65,20 @@ def test_read_metadata_raw_and_file(wiki, tmp_path):
     assert wiki.calls[-1][1]["revids"] == "10"
 
 
+def test_module_entrypoint_utf8_pipe(wiki):
+    import os
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-m", "mw_cli", "read", "Guide", "--raw"],
+        env={**os.environ, "PYTHONIOENCODING": "ascii"},
+        capture_output=True,
+        check=True,
+    )
+    assert result.stdout.decode("utf-8") == "Original α text"
+
+
 def test_create_edit_conflict_and_cookie(wiki):
     out = ok("write", "New", "--file", "-", "--create-only", "--summary", "create", input="New α")
     rev = out["edit"]["newrevid"]

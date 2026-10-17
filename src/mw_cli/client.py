@@ -55,14 +55,17 @@ class Client:
                 return self.request(params, retries=retries - 1)
             if not 200 <= response.status_code < 300:
                 raise WikiError(
-                    "http-error",
-                    f"HTTP {response.status_code}; verify the API URL. Redirects are not followed.",
+                    "outcome-unknown" if post and response.status_code >= 500 else "http-error",
+                    f"HTTP {response.status_code}; inspect wiki state before retrying a write. Redirects are not followed.",
                     details={"status": response.status_code},
                 )
             try:
                 result = response.json()
             except ValueError as exc:
-                raise WikiError("invalid-response", "API did not return JSON.") from exc
+                raise WikiError(
+                    "outcome-unknown" if post else "invalid-response",
+                    "API did not return JSON. Inspect wiki state before retrying a write.",
+                ) from exc
         finally:
             response.close()
         if not isinstance(result, dict):

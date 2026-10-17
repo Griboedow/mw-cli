@@ -73,6 +73,15 @@ def test_network_error_does_not_retry_mutation(post, code):
     assert c.session.request.call_count == 1
 
 
+@pytest.mark.parametrize("result", [response({}, 502), response(b"upstream failure")])
+def test_ambiguous_write_response(result):
+    c = fake_client(result)
+    with pytest.raises(WikiError) as error:
+        c.request({"action": "edit"}, post=True)
+    assert error.value.code == "outcome-unknown"
+    assert c.session.request.call_count == 1
+
+
 def test_login_rejection_and_anonymous_tokens():
     c = fake_client(
         response({"query": {"tokens": {"logintoken": "login"}}}), response({"login": {"result": "Failed"}})

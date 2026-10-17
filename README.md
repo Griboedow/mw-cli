@@ -168,6 +168,68 @@ automatic patrol events and respects suppression permissions.
 
 Reference: [MediaWiki patrol API](https://www.mediawiki.org/wiki/API:Patrol).
 
+### Moderator and administrator tools
+
+```sh
+mw-cli contributions Example --namespace 0 --all
+mw-cli logs --type block --title User:Example --all
+mw-cli blocks --user Example --all
+mw-cli block Example --expiry '2 hours' --reason 'Repeated vandalism' --dry-run
+mw-cli block Example --expiry '2 hours' --page Guide --reason 'Disruption on Guide'
+mw-cli unblock --id 123 --reason 'Issue resolved'
+```
+
+`contributions` exposes visible edit history beyond recent-changes retention;
+`logs` filters by action type, actor, affected title and UTC time. `blocks` shows
+active blocks including partial restrictions; `--ip` can find blocks applying to
+an address. All these collections support bounded pagination.
+
+`block` requires an explicit expiry and reason, authentication, current guidelines,
+the `block` right and the Bot Password `blockusers` grant. Autoblocking IPs is off
+unless `--autoblock` is supplied. `--page`/`--namespace` enable partial restrictions;
+without them the block is sitewide. `--reblock` explicitly replaces a single existing
+block; version-specific multiple-block management is available through `api`.
+`unblock` requires exactly one of `--id` or `--user`; ID is preferable when multiple
+blocks exist. Both writes support `--dry-run` and do not retry ambiguous failures.
+
+Extension-specific commands (no extension code is bundled):
+
+```sh
+mw-cli moderation show 123
+mw-cli moderation approve 123 --dry-run
+mw-cli moderation reject 123
+mw-cli flagged config
+mw-cli flagged pending --all
+mw-cli flagged pending --new --all
+mw-cli flagged review 456 --flag accuracy=1 --comment 'Checked sources'
+mw-cli flagged review 456 --unapprove --comment 'Needs further work'
+```
+
+`moderation` targets **Extension:Moderation**, not core patrol. The supported public
+API exposes single-edit actions but no general queue listing: obtain `modid` from
+the queued-edit response or `Special:Moderation`. `show` is an authenticated read
+using the extension's POST/CSRF protocol; approve/reject require the guidelines
+receipt. There is no bulk acceptance and that API has no free-form reason parameter.
+
+`flagged` targets **FlaggedRevs**. Default pending pages have outdated reviews;
+`--new` requests never-reviewed pages if that installation exposes `unreviewedpages`.
+`config` and `api paraminfo --param modules=review` describe available flag levels;
+invalid/unsupported flags are rejected before sending a review. Omitting flags uses
+the server's binary/default review semantics. Review rights and appropriate Bot
+Password grants must be configured on the server. Missing extension modules fail
+explicitly rather than returning a misleading empty queue.
+
+Core administration is live-tested on MediaWiki 1.43.1/1.45.0. Extension commands
+are API-contract tested against their public interfaces; these extensions were not
+enabled on the two local test wikis, so their live approval workflows are not yet
+verified. Permissions/settings/version compatibility remain server-dependent.
+
+API references: [blocks](https://www.mediawiki.org/wiki/API:Block),
+[contributions](https://www.mediawiki.org/wiki/API:Usercontribs),
+[logs](https://www.mediawiki.org/wiki/API:Logevents),
+[Moderation](https://github.com/edwardspec/mediawiki-moderation/blob/master/api/ApiModeration.php),
+[FlaggedRevs](https://www.mediawiki.org/wiki/Extension:FlaggedRevs#API).
+
 ### Output and writes
 
 - JSON on stdout by default; `read --raw` emits source and `parse --raw` emits HTML.

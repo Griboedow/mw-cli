@@ -84,7 +84,7 @@ def main():
         $services = \MediaWiki\MediaWikiServices::getInstance();
         $class = class_exists('MediaWiki\\User\\BotPassword') ? 'MediaWiki\\User\\BotPassword' : 'BotPassword';
         $bot = $class::newUnsaved(['username' => 'Admin', 'appId' => 'mw-cli',
-          'grants' => ['basic', 'editpage', 'createeditmovepage', 'uploadfile', 'uploadeditmovefile', 'delete', 'patrol']]);
+          'grants' => ['basic', 'editpage', 'createeditmovepage', 'uploadfile', 'uploadeditmovefile', 'delete', 'patrol', 'blockusers']]);
         $password = $services->getPasswordFactory()->newFromPlaintext(getenv('MW_LIVE_PASSWORD'));
         $status = $bot->save('insert', $password);
         if (!$status->isOK()) { throw new RuntimeException('Bot Password setup failed'); }
@@ -103,6 +103,7 @@ def main():
             "MW_LIVE_PASSWORD": bot_password,
             "MW_LIVE_PATROL": "1",
             "MW_LIVE_AGENT": "1",
+            "MW_LIVE_ADMIN": "1",
             "MW_LIVE_EDITOR_USERNAME": "PatrolEditor@mw-cli",
             "MW_LIVE_EDITOR_PASSWORD": secrets.token_hex(20),
             "NO_PROXY": "127.0.0.1,localhost",
@@ -143,6 +144,7 @@ def main():
                         "tests/test_live.py",
                         "tests/test_patrol_live.py",
                         "tests/test_agent_live.py",
+                        "tests/test_admin_live.py",
                         "-v",
                     ],
                     env=env,

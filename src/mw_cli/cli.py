@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from . import __version__, editing, files, semantic
+from . import __version__, admin, editing, files, semantic
 from . import blame as attribution
 from . import patrol as patrolling
 from .client import Client
@@ -1244,6 +1244,9 @@ def api(action, param, params_file, write_, dry_run, all_, max_batches):
         emit(
             client().collect(params, all=True, max_batches=max_batches) if all_ else client().request(params)
         )
+
+
+admin.register(cli, lambda: client(), emit, mutation, paging, dry_option)
 
 
 def main():

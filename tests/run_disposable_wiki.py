@@ -102,6 +102,7 @@ def main():
             "MW_LIVE_USERNAME": "Admin@mw-cli",
             "MW_LIVE_PASSWORD": bot_password,
             "MW_LIVE_PATROL": "1",
+            "MW_LIVE_AGENT": "1",
             "MW_LIVE_EDITOR_USERNAME": "PatrolEditor@mw-cli",
             "MW_LIVE_EDITOR_PASSWORD": secrets.token_hex(20),
             "NO_PROXY": "127.0.0.1,localhost",
@@ -135,7 +136,15 @@ def main():
                 else:
                     raise RuntimeError("Disposable wiki did not become ready")
                 subprocess.run(
-                    [sys.executable, "-m", "pytest", "tests/test_live.py", "tests/test_patrol_live.py", "-v"],
+                    [
+                        sys.executable,
+                        "-m",
+                        "pytest",
+                        "tests/test_live.py",
+                        "tests/test_patrol_live.py",
+                        "tests/test_agent_live.py",
+                        "-v",
+                    ],
                     env=env,
                     check=True,
                 )

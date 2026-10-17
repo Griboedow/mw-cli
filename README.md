@@ -64,6 +64,39 @@ Other commands: `pages`, `history`, `links`, `backlinks`, `categories`,
 Use `COMMAND --help` for examples and constraints. `api paraminfo` discovers
 extension-specific modules. SMW writes use the normal wikitext edit workflow.
 
+## Source editing and discovery
+
+```sh
+mw-cli info 'Guide'
+mw-cli sections 'Guide'
+mw-cli templates 'Guide' --all
+mw-cli embedded-in 'Template:Infobox' --all
+mw-cli file list --prefix Architecture --all
+mw-cli preview 'Guide' --file guide.wiki --base-revid 123
+mw-cli replace 'Guide' --old 'old name' --new 'new name' --count 1 --base-revid 123 --summary 'Rename' --dry-run
+mw-cli api query --param list=allpages --param aplimit=50 --all --max-batches 10
+```
+
+`preview` compares proposed complete source against an existing page and returns a
+unified diff plus `base_revid`. It is read-only and does not require editing rights.
+Use `parse --file` separately for server-side rendering. `replace` performs exact,
+case-sensitive, non-overlapping source replacements. The expected `--count` defaults
+to **one**; a mismatch or stale base revision prevents writing. All matches are
+replaced only when the count is exact. Dry-run shows the diff and checks configured
+guidelines; remove `--dry-run` to save. Identical output creates no edit. For complex
+multiline changes use a local file with `preview` and `write`.
+
+`info` preserves the API's missing-page flag and includes protection and URLs.
+`sections` exposes parser section indices and revision ID; transcluded sections may
+belong to another page. `templates` and `embedded-in` inspect transclusion in either
+direction. `file list` inventories the local file repository, not shared repositories
+or historical file versions. All collections have the normal pagination controls.
+
+`api query --all` follows standard continuation with bounded batches and loop checks.
+It returns `batches`, `complete`, and `continuation`; without `--all`, the raw response
+shape stays unchanged. Write actions and non-query modules reject `--all`.
+Use `smw ask --all` for Semantic MediaWiki's different pagination protocol.
+
 ## Phrase attribution and diagnostics
 
 ```sh

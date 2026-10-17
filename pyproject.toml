@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "griboedow-mw-cli"
-version = "0.3.0"
+version = "0.4.0"
 description = "Agent-friendly MediaWiki CLI with files, Semantic MediaWiki and revision-bound guidelines"
 readme = "README.md"
 requires-python = ">=3.10"

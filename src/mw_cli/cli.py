@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from . import __version__, files, semantic
+from . import __version__, editing, files, semantic
 from . import blame as attribution
 from . import patrol as patrolling
 from .client import Client
@@ -353,6 +353,99 @@ def write(
     mutation(params, dry_run)
 
 
+@cli.command("preview")
+@click.argument("title")
+@click.option(
+    "--file",
+    "source",
+    type=click.File("r", encoding="utf-8"),
+    required=True,
+    help="Proposed complete UTF-8 source; '-' reads stdin.",
+)
+@click.option("--base-revid", type=click.IntRange(min=1), help="Reject if the current revision differs.")
+def preview_edit(title, source, base_revid):
+    """Show a local unified source diff against an existing page, without writing.
+
+    Example: mw-cli preview Guide --file guide.wiki --base-revid 123
+    Returns base_revid, changed, diff. Does not require editing rights/guidelines.
+    This is not parser validation: use parse --file for a server-rendered preview.
+    Save with write --base-revid using the revision inspected here.
+    """
+    page = client().read(title)
+    editing.check_base(page, base_revid)
+    emit(editing.preview(page, source.read()))
+
+
+@cli.command("replace")
+@click.argument("title")
+@click.option("--old", required=True, help="Exact case-sensitive source fragment, not a regex.")
+@click.option("--new", required=True, help="Replacement text; an empty string deletes the fragment.")
+@click.option(
+    "--count",
+    "expected_count",
+    type=click.IntRange(min=1),
+    default=1,
+    show_default=True,
+    help="Expected number of non-overlapping occurrences; all must match, then all are replaced.",
+)
+@click.option(
+    "--base-revid",
+    type=click.IntRange(min=1),
+    required=True,
+    help="Revision you read before deciding to replace this fragment.",
+)
+@click.option("--summary", required=True, help="Edit summary.")
+@dry_option
+def replace_text(title, old, new, expected_count, base_revid, summary, dry_run):
+    """Replace an exact fragment with revision and match-count checks; returns a diff.
+
+    Example: mw-cli replace Guide --old 'old name' --new 'new name' --base-revid 123 --summary 'Rename' --dry-run
+    Reads the current source, requires the supplied base revision and exact --count,
+    then saves with server-side conflict detection. Ambiguous matches are errors.
+    Guidelines/authentication apply even in dry-run. Identical output makes no edit.
+    No regex, template-aware rewriting, implicit redirects or conflict retries.
+    """
+    require(bool(old), "--old cannot be empty.")
+    emit(
+        editing.replace(
+            client(),
+            title,
+            old,
+            new,
+            base_revid=base_revid,
+            expected_count=expected_count,
+            summary=summary,
+            dry_run=dry_run,
+        )
+    )
+
+
+@cli.command("info")
+@click.argument("title")
+def page_info(title):
+    """Inspect page existence, latest revision, content model, URL and protection.
+
+    Missing pages remain marked missing in JSON, useful for existence checks.
+    Does not follow redirects. Example: mw-cli info 'Template:Infobox'
+    """
+    emit(
+        client().request(
+            {"action": "query", "prop": "info", "titles": title, "inprop": "url|protection|talkid|subjectid"}
+        )
+    )
+
+
+@cli.command("sections")
+@click.argument("title")
+def sections(title):
+    """Get parser section indices/headings/anchors for write --section.
+
+    Indices can change after edits; retain the source base_revid when writing.
+    Transcluded sections may belong to a different page: inspect fromtitle/index.
+    """
+    emit(client().request({"action": "parse", "page": title, "prop": "sections|revid"}))
+
+
 @cli.command()
 @click.argument("query")
 @click.option("--namespace", default="0", show_default=True, help="Namespace IDs separated by '|'.")
@@ -548,6 +641,16 @@ def add_relation(name, description, params_factory):
 
 add_relation(
     "links", "List outgoing wiki links from TITLE.", lambda t, n: {"prop": "links", "titles": t, "pllimit": n}
+)
+add_relation(
+    "templates",
+    "List pages/templates transcluded by TITLE.",
+    lambda t, n: {"prop": "templates", "titles": t, "tllimit": n},
+)
+add_relation(
+    "embedded-in",
+    "List pages transcluding TITLE (include Template: where applicable).",
+    lambda t, n: {"list": "embeddedin", "eititle": t, "eilimit": n},
 )
 add_relation(
     "backlinks",
@@ -862,6 +965,30 @@ def file_info(title):
     emit(files.info(client(), title))
 
 
+@file_group.command("list")
+@click.option("--prefix", default="", help="Filename prefix without File:; underscores follow server rules.")
+@paging
+def file_list(prefix, limit, all_, max_batches):
+    """List local wiki files alphabetically with URL, MIME, size, SHA-1 and uploader.
+
+    Example: mw-cli file list --prefix Architecture --all
+    Uses allimages, not an inventory of shared/foreign repositories or old versions.
+    """
+    emit(
+        client().collect(
+            {
+                "action": "query",
+                "list": "allimages",
+                "aiprefix": prefix,
+                "ailimit": limit,
+                "aiprop": "timestamp|user|url|size|sha1|mime",
+            },
+            all=all_,
+            max_batches=max_batches,
+        )
+    )
+
+
 @file_group.command("download")
 @click.argument("title")
 @click.option(
@@ -1024,15 +1151,24 @@ def smw_info():
     "--write",
     "write_",
     is_flag=True,
-    help="Explicit mutation mode: checks guidelines, authenticates, POSTs with CSRF token.",
+    help="Explicit mutation mode: checks guidelines, authenticates, POSTs with the action's token.",
 )
 @dry_option
-def api(action, param, params_file, write_, dry_run):
+@click.option("--all", "all_", is_flag=True, help="Follow standard action=query continuation; read-only.")
+@click.option(
+    "--max-batches",
+    type=click.IntRange(1, 10000),
+    default=100,
+    show_default=True,
+    help="Hard stop for --all. Check complete/continuation in the result.",
+)
+def api(action, param, params_file, write_, dry_run, all_, max_batches):
     """Escape hatch for additional API modules. JSON responses are preserved.
 
     Read mode allows query, parse, compare, expandtemplates, paraminfo, help,
     ask, askargs, smwbrowse and smwinfo. Other modules require --write; never
-    bypass the guidelines gate. Mutating extensions must accept a CSRF token.
+    bypass the guidelines gate. Known core actions select their token type;
+    mutating extensions must accept a CSRF token.
     Use paraminfo to discover installed API parameters instead of guessing.
 
     \b
@@ -1042,6 +1178,8 @@ def api(action, param, params_file, write_, dry_run):
 
     Raw edit also requires baserevid or createonly. For binary uploads use file
     upload. No login/logout/token overrides here. Dry-run is for --write only.
+    --all is only for read-mode action=query: returns batches/complete/continuation.
+    Without --all the original response shape is preserved. SMW uses smw ask --all.
     """
     params = json.load(params_file) if params_file else {}
     require(isinstance(params, dict), "--params-file must contain a JSON object.")
@@ -1068,6 +1206,7 @@ def api(action, param, params_file, write_, dry_run):
         "Use the dedicated authentication/file workflow.",
     )
     require(not dry_run or write_, "--dry-run requires --write.")
+    require(not all_ or (action == "query" and not write_), "--all requires read-mode action=query.")
     require(
         all(isinstance(v, (str, int, float, bool)) or v is None for v in params.values()),
         "API parameters must be scalar values.",
@@ -1102,7 +1241,9 @@ def api(action, param, params_file, write_, dry_run):
             },
             "Unknown/read-unsafe action. Use --write for mutating modules.",
         )
-        emit(client().request(params))
+        emit(
+            client().collect(params, all=True, max_batches=max_batches) if all_ else client().request(params)
+        )
 
 
 def main():

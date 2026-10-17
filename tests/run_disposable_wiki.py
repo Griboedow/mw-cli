@@ -84,10 +84,16 @@ def main():
         $services = \MediaWiki\MediaWikiServices::getInstance();
         $class = class_exists('MediaWiki\\User\\BotPassword') ? 'MediaWiki\\User\\BotPassword' : 'BotPassword';
         $bot = $class::newUnsaved(['username' => 'Admin', 'appId' => 'mw-cli',
-          'grants' => ['basic', 'editpage', 'createeditmovepage', 'uploadfile', 'uploadeditmovefile', 'delete']]);
+          'grants' => ['basic', 'editpage', 'createeditmovepage', 'uploadfile', 'uploadeditmovefile', 'delete', 'patrol']]);
         $password = $services->getPasswordFactory()->newFromPlaintext(getenv('MW_LIVE_PASSWORD'));
         $status = $bot->save('insert', $password);
         if (!$status->isOK()) { throw new RuntimeException('Bot Password setup failed'); }
+        $editor = $services->getUserFactory()->newFromName('PatrolEditor');
+        $editor->addToDatabase();
+        $bot = $class::newUnsaved(['username' => 'PatrolEditor', 'appId' => 'mw-cli',
+          'grants' => ['basic', 'editpage', 'createeditmovepage']]);
+        $status = $bot->save('insert', $services->getPasswordFactory()->newFromPlaintext(getenv('MW_LIVE_EDITOR_PASSWORD')));
+        if (!$status->isOK()) { throw new RuntimeException('Editor Bot Password setup failed'); }
         """
         env = {
             **os.environ,
@@ -95,6 +101,9 @@ def main():
             "MW_LIVE_API": "http://127.0.0.1:8765/api.php",
             "MW_LIVE_USERNAME": "Admin@mw-cli",
             "MW_LIVE_PASSWORD": bot_password,
+            "MW_LIVE_PATROL": "1",
+            "MW_LIVE_EDITOR_USERNAME": "PatrolEditor@mw-cli",
+            "MW_LIVE_EDITOR_PASSWORD": secrets.token_hex(20),
             "NO_PROXY": "127.0.0.1,localhost",
         }
         # eval.php executes one input line at a time, unlike a normal PHP script.
@@ -122,7 +131,9 @@ def main():
                 else:
                     raise RuntimeError("Disposable wiki did not become ready")
                 subprocess.run(
-                    [sys.executable, "-m", "pytest", "tests/test_live.py", "-v"], env=env, check=True
+                    [sys.executable, "-m", "pytest", "tests/test_live.py", "tests/test_patrol_live.py", "-v"],
+                    env=env,
+                    check=True,
                 )
             finally:
                 server.terminate()

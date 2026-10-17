@@ -101,7 +101,7 @@ class Client:
         return result["query"]["tokens"][kind + "token"]
 
     def mutate(self, params, *, files=None):
-        token = self.token("watch" if params["action"] == "watch" else "csrf")
+        token = self.token({"watch": "watch", "patrol": "patrol"}.get(params["action"], "csrf"))
         result = self.request({**params, "assert": "user", "token": token}, post=True, files=files)
         if "edit" in result and result["edit"].get("result") != "Success":
             raise WikiError(

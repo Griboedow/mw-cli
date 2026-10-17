@@ -7,6 +7,7 @@ import click
 
 from . import __version__, files, semantic
 from . import blame as attribution
+from . import patrol as patrolling
 from .client import Client
 from .config import config_path, read_json, resolve, write_json
 from .errors import WikiError, require
@@ -565,19 +566,130 @@ add_relation(
 )
 
 
+def change_filters(fn):
+    for option, help_text in (
+        ("--title", "Restrict to this page title."),
+        ("--user", "Restrict to this editor's username."),
+        ("--start", "Newest UTC timestamp, e.g. 2026-10-17T18:00:00Z (newest first)."),
+        ("--end", "Oldest UTC timestamp, e.g. 2026-10-16T00:00:00Z."),
+        ("--namespace", "Namespace IDs separated by '|'."),
+    ):
+        fn = click.option(option, help=help_text)(fn)
+    fn = click.option("--exclude-bots", is_flag=True, help="Exclude changes marked as bot edits.")(fn)
+    return fn
+
+
+def changes(*, unpatrolled=False, **options):
+    show = (["!patrolled"] if unpatrolled else []) + (["!bot"] if options["exclude_bots"] else [])
+    return client().collect(
+        {
+            "action": "query",
+            "list": "recentchanges",
+            "rcnamespace": options["namespace"],
+            "rctitle": options["title"],
+            "rcuser": options["user"],
+            "rcstart": options["start"],
+            "rcend": options["end"],
+            "rcshow": "|".join(show) or None,
+            "rctype": "edit|new" if unpatrolled else None,
+            "rclimit": options["limit"],
+            "rcprop": "title|ids|timestamp|user|comment|flags|sizes|tags"
+            + ("|patrolled" if unpatrolled else ""),
+        },
+        all=options["all_"],
+        max_batches=options["max_batches"],
+    )
+
+
 @cli.command("recent-changes")
-@click.option("--namespace", help="Namespace IDs separated by '|'.")
+@change_filters
+@click.option("--unpatrolled", is_flag=True, help="Only unpatrolled edits/new pages; requires patrol rights.")
 @paging
-def recent_changes(namespace, limit, all_, max_batches):
+def recent_changes(**options):
     """List recent changes, newest first (bounded by the server's retention)."""
+    emit(changes(**options))
+
+
+@cli.group()
+def patrol():
+    """Review and mark core MediaWiki recent-change patrol (not FlaggedRevs approval).
+
+    Workflow: patrol queue -> patrol show REVID -> guidelines read -> patrol mark.
+    Use whoami to check patrol/patrolmarks rights and a Bot Password with the
+    patrol grant. Server patrol settings and recent-changes retention apply.
+    Mark only revisions you reviewed; there is no automatic bulk acceptance.
+    Use undo with --base-revid to revert a bad edit instead of marking it.
+    """
+
+
+@patrol.command("queue")
+@change_filters
+@paging
+def patrol_queue(**options):
+    """List unpatrolled edits/new pages with rcid, revid and old_revid for review.
+
+    Example: mw-cli patrol queue --namespace 0 --exclude-bots --all
+    Default newest first. --start/--end bound UTC time, --title/--user filter.
+    complete describes pagination, not the entire history beyond server retention.
+    Requires patrol or patrolmarks rights; permissions/errors are not hidden.
+    """
+    emit(changes(unpatrolled=True, **options))
+
+
+@patrol.command("show")
+@click.argument("revision", type=click.IntRange(min=1))
+def patrol_show(revision):
+    """Inspect REVID: author, summary, tags, source and HTML diff against its parent.
+
+    Example: mw-cli patrol show 123
+    Creation has no parent: diff=null, creation=true; review the full source.
+    Hidden/inaccessible source fails explicitly. This never marks the edit.
+    """
+    emit(patrolling.inspect_revision(client(), revision))
+
+
+@patrol.command("mark")
+@click.option("--rcid", type=click.IntRange(min=1), help="Recent-changes ID from patrol queue.")
+@click.option("--revision", type=click.IntRange(min=1), help="Revision ID you reviewed.")
+@click.option("--tag", multiple=True, help="Existing allowed change tag for the patrol log; repeatable.")
+@dry_option
+def patrol_mark(rcid, revision, tag, dry_run):
+    """Mark exactly one reviewed edit as patrolled. Supply --rcid OR --revision.
+
+    Example: mw-cli patrol mark --revision 123
+    Requires authentication, patrol grant/right and current guidelines receipt.
+    Own edits may be disallowed. Expired/already patrolled edits follow server
+    semantics. On outcome-unknown check queue/log before retrying. Core MediaWiki
+    has no corresponding unpatrol command. No publication/FlaggedRevs approval.
+    """
+    require(bool(rcid) != bool(revision), "Supply exactly one of --rcid or --revision.")
+    mutation({"action": "patrol", "rcid": rcid, "revid": revision, "tags": "|".join(tag) or None}, dry_run)
+
+
+@patrol.command("log")
+@click.option("--title", help="Filter by page title.")
+@click.option("--user", help="Filter by patrolling user (not the original editor).")
+@click.option("--start", help="Newest UTC timestamp, newest first.")
+@click.option("--end", help="Oldest UTC timestamp.")
+@paging
+def patrol_log(title, user, start, end, limit, all_, max_batches):
+    """Read patrol log events, including automatic patrol where recorded by the server.
+
+    Example: mw-cli patrol log --title Guide --all
+    Includes log details/revision IDs when visible. Suppressed details stay hidden.
+    """
     emit(
         client().collect(
             {
                 "action": "query",
-                "list": "recentchanges",
-                "rcnamespace": namespace,
-                "rclimit": limit,
-                "rcprop": "title|ids|timestamp|user|comment|flags",
+                "list": "logevents",
+                "letype": "patrol",
+                "letitle": title,
+                "leuser": user,
+                "lestart": start,
+                "leend": end,
+                "lelimit": limit,
+                "leprop": "ids|title|type|user|timestamp|comment|details",
             },
             all=all_,
             max_batches=max_batches,

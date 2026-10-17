@@ -102,6 +102,41 @@ API contracts: [revisions](https://www.mediawiki.org/wiki/API:Revisions),
 
 ## Agent contract
 
+### Patrol workflow
+
+```sh
+mw-cli patrol queue --namespace 0 --exclude-bots --all
+mw-cli patrol show 123
+mw-cli guidelines read
+mw-cli patrol mark --revision 123 --dry-run
+mw-cli patrol mark --revision 123
+mw-cli patrol log --title 'Guide' --all
+```
+
+`patrol queue` returns unpatrolled edits/new pages with `rcid`, `revid`, `old_revid`,
+author, summary, tags and sizes. Filters: `--title`, `--user`, `--namespace`,
+`--start` (newer UTC timestamp), `--end` (older UTC timestamp), `--exclude-bots`.
+The same filters and `--unpatrolled` are available on `recent-changes`.
+`patrol show REVID` returns full source and the HTML diff against its actual parent;
+for page creation, review the full source (`creation=true`, `diff=null`).
+
+`patrol mark` takes exactly one `--revision` or `--rcid`, supports `--dry-run` and
+repeatable `--tag`, and enforces the guidelines guard. It uses a dedicated patrol
+token, including through `api patrol --write`. The user needs the `patrol` right
+and the Bot Password needs the **patrol** grant. Inspect `whoami` if access fails.
+Queue visibility requires `patrol`/`patrolmarks`; ordinary recent-changes queries
+do not request protected patrol flags. Site settings and RC retention apply.
+
+This is core MediaWiki patrol, not FlaggedRevs version approval or Moderation
+queue approval. No bulk acceptance or automatic unpatrol is provided. Review first;
+use `undo` with a current `--base-revid` for edits that should be reverted. On an
+ambiguous write failure, inspect queue/log before retrying. The log can contain
+automatic patrol events and respects suppression permissions.
+
+Reference: [MediaWiki patrol API](https://www.mediawiki.org/wiki/API:Patrol).
+
+### Output and writes
+
 - JSON on stdout by default; `read --raw` emits source and `parse --raw` emits HTML.
 - JSON API/network/local errors on stderr. Click usage errors are human-readable.
 - Exit codes: **0** success, **1** operation failure, **2** invalid input,
@@ -163,6 +198,11 @@ MediaWiki 1.43.1 and 1.45.0 with SQLite for real Bot Password/page/file tests.
 `python tests/run_disposable_wiki.py 1.43.1` reproduces the live setup with Python
 3.12+ and a PHP CLI with sqlite3, intl, mbstring, XML and fileinfo available.
 Semantic MediaWiki is covered by API-contract tests, not this core-only live matrix.
+The live matrix also tests the patrol workflow with separate editor/reviewer bots.
+`tests/test_patrol_live.py` can run against an explicitly selected local **test** wiki
+using `MW_LIVE_PATROL=1` and the reviewer/editor environment variables documented in
+that file. It creates unique test pages and removes them in cleanup; it does not
+change site permissions or settings. The editor must not have `autopatrol`.
 
 API references: [Action API](https://www.mediawiki.org/wiki/API:Main_page),
 [Bot Password login](https://www.mediawiki.org/wiki/API:Login),

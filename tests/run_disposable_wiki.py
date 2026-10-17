@@ -106,10 +106,14 @@ def main():
             "MW_LIVE_EDITOR_PASSWORD": secrets.token_hex(20),
             "NO_PROXY": "127.0.0.1,localhost",
         }
-        # eval.php executes one input line at a time, unlike a normal PHP script.
+        # eval.php reads bounded input lines (1024 bytes in supported releases).
+        # Load a file instead of putting the growing setup program on stdin.
+        setup_path = root / "setup-bots.php"
+        setup_path.write_text("<?php\n" + setup, encoding="utf-8")
+        env["MW_CLI_SETUP_FILE"] = str(setup_path)
         subprocess.run(
             ["php", "maintenance/eval.php"],
-            input=" ".join(setup.splitlines()) + "\n",
+            input="require getenv('MW_CLI_SETUP_FILE');\n",
             text=True,
             env=env,
             cwd=wiki,
